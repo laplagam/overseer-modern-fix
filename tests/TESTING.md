@@ -5,7 +5,10 @@
 ```powershell
 powershell -ExecutionPolicy Bypass -File tests\smoke-test.ps1            # auto-detects the GOG install
 powershell -ExecutionPolicy Bypass -File tests\smoke-test.ps1 -GameDir "D:\Games\Overseer"
+powershell -ExecutionPolicy Bypass -File tests\smoke-test.ps1 -GameDir "D:\SteamLibrary\steamapps\common\Overseer"
 ```
+
+A Steam copy is started through Steam (`steam://rungameid/302370`). Steam must be running, and the fix's launch options must be set.
 
 The game takes over the screen for about 30 seconds; don't touch the mouse or keyboard while it runs.
 
@@ -41,3 +44,9 @@ Run through this after installing the fix. Note your Windows build, GPU and scre
 - [ ] Alt+Tab out and back in 3D: textures stay visible, music keeps playing
 - [ ] Alt+Tab out and back **during a cinematic** (e.g. pick up the magazine by the office door): the video continues, and the office is textured (not white) afterwards
 - [ ] **Exit Game** closes cleanly (no crash dialog)
+
+Steam version, additionally:
+- [ ] The game's Launch Options (Properties → General) show `"C:\TexOverseer-Steam\OVERSEER.EXE" %command%`
+- [ ] Starting from Steam doesn't ask for admin rights, and Steam shows the game as running
+- [ ] The opening video has sound, and the game doesn't crash when it starts, with the Steam overlay **on** and **off**
+- [ ] After `Uninstall.cmd` (with Steam closed), the launch options are back to what they were

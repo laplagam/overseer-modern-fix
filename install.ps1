@@ -12,7 +12,8 @@
     Everything changed is backed up; run uninstall.ps1 to revert.
 
 .PARAMETER GameDir
-    Game folder. Auto-detected from the GOG registry entry or the script location if omitted.
+    Game folder. If omitted, every GOG and Steam copy found is fixed (falling back to the script
+    location or a folder picker).
 #>
 [CmdletBinding()]
 param(
@@ -31,9 +32,10 @@ if (-not (Test-IsAdmin)) {
     return
 }
 
-try {
-    $GameDir = Resolve-GameDir -GameDir $GameDir
-    Write-Ok "Game folder: $GameDir"
+function Install-Fix([string]$GameDir) {
+    $steam = Test-IsSteamCopy $GameDir
+    Write-Host ''
+    Write-Host "--- $(if ($steam) { 'Steam' } else { 'GOG' }) copy: $GameDir ---" -ForegroundColor Cyan
     Test-GameFiles -GameDir $GameDir
 
     $backup = Initialize-Backup -GameDir $GameDir
@@ -56,18 +58,22 @@ try {
     # 5. Intel RSX 3D audio (required for any digital sound).
     Install-Rsx -GameDir $GameDir -Backup $backup
 
-    # 6. ffdshow (FMV decoder shipped by GOG).
+    # 6. ffdshow (FMV decoder shipped with the game).
     Register-Ffdshow -GameDir $GameDir -Backup $backup
 
     # 7. Shortcuts.
     Set-Shortcuts -GameDir $GameDir -LaunchDir $launchDir -Backup $backup
 
     Save-Backup $backup
-    Write-Host ''
-    Write-Ok 'Done! Start the game from the GOG shortcut, GOG Galaxy, or OVERSEER.EXE.'
+    if ($steam) { Write-Ok 'Done! Start the game from Steam as usual.' }
+    else { Write-Ok 'Done! Start the game from the GOG shortcut, GOG Galaxy, or OVERSEER.EXE.' }
     if ($launchDir -ne $GameDir) {
         Write-Warn2 "Your game folder path is long, so the game is started through: $launchDir"
     }
+}
+
+try {
+    foreach ($dir in (Resolve-GameDirs -GameDir $GameDir)) { Install-Fix -GameDir $dir }
 }
 catch {
     Write-Host ''

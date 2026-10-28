@@ -125,7 +125,6 @@ static DWORD WINAPI ReplayThread(LPVOID unused)
     Sleep(g_replayDelay);
     if (g_videoPlaying) { g_heldBack = TRUE; return 0; }   /* next video started; wait for it */
     Log("replaying focus change (foreground=%d)\r\n", GameIsForeground());
-    PostMessageA(g_gameWnd, WM_ACTIVATEAPP, FALSE, 0);
     if (GameIsForeground()) PostMessageA(g_gameWnd, WM_ACTIVATEAPP, TRUE, 0);
     return 0;
 }
@@ -150,10 +149,34 @@ static const GUID IID_IMediaControl_ = { 0x56A868B1, 0x0AD4, 0x11CE, { 0xB0, 0x3
 typedef HRESULT (WINAPI *MediaControlCall_t)(void *);
 static MediaControlCall_t g_origRun, g_origPause, g_origStop;
 
+/* Debug log only: the names of the filters in the graph. */
+static const GUID IID_IFilterGraph_ = { 0x56A8689F, 0x0AD4, 0x11CE, { 0xB0, 0x3A, 0x00, 0x20, 0xAF, 0x0B, 0xA7, 0x70 } };
+static void LogFilters(void *mediaControl)
+{
+    IUnknown *unk = (IUnknown *)mediaControl, *graph = NULL, *en = NULL, *filter = NULL;
+    ULONG got;
+    if (!g_logPath[0] || FAILED(unk->lpVtbl->QueryInterface(unk, &IID_IFilterGraph_, (void **)&graph))) return;
+    /* IFilterGraph::EnumFilters = slot 5, IEnumFilters::Next = 3, IBaseFilter::QueryFilterInfo = 12 */
+    if (SUCCEEDED(((HRESULT (WINAPI *)(void *, IUnknown **))(*(void ***)graph)[5])(graph, &en))) {
+        while (((HRESULT (WINAPI *)(void *, ULONG, IUnknown **, ULONG *))(*(void ***)en)[3])(en, 1, &filter, &got) == S_OK) {
+            struct { WCHAR name[128]; IUnknown *graph; } info;
+            if (SUCCEEDED(((HRESULT (WINAPI *)(void *, void *))(*(void ***)filter)[12])(filter, &info))) {
+                char name[128];
+                WideCharToMultiByte(CP_ACP, 0, info.name, -1, name, sizeof(name), NULL, NULL);
+                Log("  filter: %s\r\n", name);
+                if (info.graph) info.graph->lpVtbl->Release(info.graph);
+            }
+            filter->lpVtbl->Release(filter);
+        }
+        en->lpVtbl->Release(en);
+    }
+    graph->lpVtbl->Release(graph);
+}
+
 static HRESULT WINAPI HookRun(void *self)
 {
     HRESULT hr = g_origRun(self);
-    if (SUCCEEDED(hr)) { InterlockedExchange(&g_videoPlaying, 1); Log("video started\r\n"); }
+    if (SUCCEEDED(hr)) { InterlockedExchange(&g_videoPlaying, 1); Log("video started\r\n"); LogFilters(self); }
     return hr;
 }
 
@@ -214,7 +237,6 @@ static HRESULT WINAPI HookCoCreate(REFCLSID clsid, LPUNKNOWN outer, DWORD ctx, R
         HookMediaControl((IUnknown *)*pv);
     return hr;
 }
-
 /* Point module `mod`'s import of dll!func at `hook`; returns the previous target or NULL. */
 static void *HookImport(HMODULE mod, const char *dll, const char *func, void *hook)
 {
@@ -284,6 +306,21 @@ static DWORD WINAPI WatchThread(LPVOID unused)
     return 0;
 }
 
+/* Steam crash fix. When a video starts, DirectShow tries Windows' video renderers and decoders
+ * as candidates, and they call Direct3DCreate9/Direct3DCreate9Ex. Under Steam those calls never
+ * returned: the Steam overlay (injected even when it is switched off for the game) and Windows'
+ * DWM8And16Bit compatibility hook both hooked them and called each other until the stack
+ * overflowed. Having d3d9.dll loaded from the start, before either of them hooks it, avoids
+ * that. */
+static void PreloadD3d9(void)
+{
+    char path[MAX_PATH];
+    UINT len = GetSystemDirectoryA(path, MAX_PATH);
+    if (len == 0 || len > MAX_PATH - 12) return;
+    lstrcatA(path, "\\d3d9.dll");
+    LoadLibraryA(path);
+}
+
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
 {
     (void)reserved;
@@ -299,6 +336,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
             g_replayDelay = v;
         }
         LoadRealMsvfw32();
+        PreloadD3d9();
         t = CreateThread(NULL, 0, WatchThread, NULL, 0, NULL);
         if (t) CloseHandle(t);
     }
