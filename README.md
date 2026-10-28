@@ -47,6 +47,12 @@ On the System Checker window, click **Continue**.
 Double-click **`Uninstall.cmd`**. Every file and registry value the fix changed is restored from the backup in `<game folder>\_overseerfix_backup`.
 For the Steam version, exit Steam first so the original launch options can be put back.
 
+If you have both the GOG and the Steam version, both are restored. To fix or restore only one of them, give its folder from a command prompt:
+```
+Uninstall.cmd -GameDir "D:\SteamLibrary\steamapps\common\Overseer"
+```
+The same works for `Install.cmd`.
+
 ## Problems?
 
 Run **`Diagnose.cmd`**. It writes `overseer-diagnostics-<date>.txt` to your Desktop. Open an issue and attach that file.
