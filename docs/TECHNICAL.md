@@ -4,6 +4,25 @@ Investigation done on Windows 11 Pro build 26300 (x64), GOG build 2.1.0.23, `OVE
 (SHA256 `5635781F…43CFC`). The Steam release (app 302370) has a byte-identical `OVERSEER.EXE` and game DLLs.
 Its differences are covered in [section 8](#8-steam).
 
+## Overview
+
+| Symptom | What the fix does | Section |
+|---|---|---|
+| The game closes right after the System Checker window | Replaces the *Windows 95* compatibility mode set by GOG and Steam with *Windows 7* mode | [1](#1-startup-crash-the-windows-95-compatibility-layer) |
+| Windows asks for administrator rights every time | Runs the game as a normal user; for Steam, through launch options so Steam's own setting no longer applies | [1](#1-startup-crash-the-windows-95-compatibility-layer), [8](#8-steam) |
+| Crash at startup when installed in a long folder path | Starts the game through a short link (`C:\TexOverseer`) | [2](#2-long-install-path-stack-buffer-overflow) |
+| "ERROR: Error Code Does Not Indicate An Error" when starting or loading a game | Sets the MIDI device name that exists on modern Windows | [3](#3-error--error-code-does-not-indicate-an-error) |
+| "Digital Sound Initialization Error" | Makes sure Intel RSX 3D audio is registered | [4](#4-intel-rsx-3d-is-required-for-all-digital-sound) |
+| Invisible or see-through objects, a tiny picture, resolution switching | Installs dgVoodoo2, scaling to the screen at 4:3 | [5](#5-graphics-dgvoodoo2) |
+| Videos play without sound | Registers the game's ffdshow decoder and whitelists the game in it | [6](#6-video) |
+| White 3D view after Alt+Tab during a cinematic; music stops after Alt+Tab | The focusfix helper DLL | [7](#7-white-3d-view-after-alttab-during-a-cinematic-and-music-stopping) |
+| Steam: crash when the first video starts | focusfix preloads Direct3D 9 | [8](#8-steam) |
+
+Other things worth knowing:
+- Uninstall restores every copy it finds. `-GameDir "<folder>"` on `Install.cmd`/`Uninstall.cmd` limits it to one copy.
+- If Steam is running during install, the launch options can't be written; the installer prints the line to paste under *Properties → General → Launch Options*.
+- Picture scaling and filtering can be changed in `dgVoodoo.conf` in the game folder.
+
 ## 1. Startup crash: the Windows 95 compatibility layer
 
 GOG writes the following value under `HKLM` and `HKCU\…\AppCompatFlags\Layers`:
