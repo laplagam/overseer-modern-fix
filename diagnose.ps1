@@ -18,15 +18,16 @@ function Add([string]$Title, $Body) {
 }
 
 Write-Banner 'Tex Murphy: Overseer - Diagnostics'
-try { $GameDir = Resolve-GameDir -GameDir $GameDir } catch { $GameDir = $null }
+try { $gameDirs = @(Resolve-GameDirs -GameDir $GameDir) } catch { $gameDirs = @() }
 
 $os = Get-CimInstance Win32_OperatingSystem
 Add 'Windows' ("{0} {1} build {2} ({3})" -f $os.Caption, $os.Version, $os.BuildNumber, $os.OSArchitecture)
 Add 'GPU' (Get-CimInstance Win32_VideoController | Select-Object Name, DriverVersion, CurrentHorizontalResolution, CurrentVerticalResolution | Format-Table -AutoSize)
 Add 'Sound devices' (Get-CimInstance Win32_SoundDevice | Select-Object Name, Status | Format-Table -AutoSize)
-Add 'Game folder' ("$GameDir (length $($GameDir.Length))")
+if (-not $gameDirs) { Add 'Game folder' 'not found' }
 
-if ($GameDir) {
+foreach ($GameDir in $gameDirs) {
+    Add 'Game folder' ("$GameDir (length $($GameDir.Length), $(if (Test-IsSteamCopy $GameDir) { 'Steam' } else { 'GOG' }))")
     $exe = Join-Path $GameDir 'OVERSEER.EXE'
     if (Test-Path $exe) { Add 'OVERSEER.EXE SHA256' (Get-FileHash $exe).Hash }
     Add 'Game folder files' (Get-ChildItem $GameDir -File | Select-Object Name, Length, LastWriteTime | Format-Table -AutoSize)

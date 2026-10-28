@@ -1,7 +1,8 @@
 # Technical notes
 
 Investigation done on Windows 11 Pro build 26300 (x64), GOG build 2.1.0.23, `OVERSEER.EXE` v1.04 b330
-(SHA256 `5635781F…43CFC`, identical to the Steam release).
+(SHA256 `5635781F…43CFC`). The Steam release (app 302370) has a byte-identical `OVERSEER.EXE` and game DLLs.
+Its differences are covered in [section 8](#8-steam).
 
 ## 1. Startup crash: the Windows 95 compatibility layer
 
@@ -64,7 +65,8 @@ Without a registered RSX COM server (`{E78F7620-96CB-11CF-A00B-444553540000}`), 
 > Digital Sound Initialization Error — Another application is currently using the Sound Device or Intel RSX 3D drivers are not installed.
 
 Setting `3DSound=0` does **not** avoid this. GOG Galaxy's support package installs `RSX.DLL`/`AAUDIO.DLL` into SysWOW64 and registers them.
-The fix only checks that this happened, and repairs it from GOG's copy if it didn't.
+Steam's install script does the same from `<game>\RSX`.
+The fix only checks that this happened, and repairs it from the game's copy if it didn't.
 
 ## 5. Graphics: dgVoodoo2
 
@@ -78,7 +80,18 @@ The fix only checks that this happened, and repairs it from GOG's copy if it did
 
 FMV (`.VOB` MPEG-2) is played by `TexDll.dll`. For each video it creates a DirectShow filter graph (`CLSID_FilterGraph`), which decodes through GOG's patched `ffdshow.ax`.
 It calls `IMediaControl::Run` when a video starts and `Pause` when it ends.
-GOG registers ffdshow from the game folder. A system-wide ffdshow install can claim some of the same CLSIDs, and the fix warns if it finds one.
+GOG and Steam both register ffdshow from the game folder. A system-wide ffdshow install can claim some of the same CLSIDs, and the fix warns if it finds one.
+
+The video graph contains:
+- *Default DirectSound Device*
+- *Mio Filtro* (the game's own renderer)
+- *ffdshow Video Decoder* and *ffdshow Audio Decoder*
+- *MPEG-2 Demultiplexer*
+- the `.VOB` source
+
+**ffdshow's compatibility manager.** When the process isn't on ffdshow's whitelist, ffdshow asks whether it should be used for that program.
+The question opens *behind* the fullscreen game. After about 15 s it defaults to "don't use ffdshow", and the video then plays without sound.
+The fix adds `overseer.exe;` to the `whitelist` value in both `HKCU\Software\GNU\ffdshow` and `HKCU\Software\GNU\ffdshow_audio`. The audio decoder keeps its own list.
 
 ## 7. White 3D view after Alt+Tab during a cinematic, and music stopping
 
@@ -105,12 +118,47 @@ dgVoodoo's `FullscreenAttributes = fake` doesn't help: textures are lost on any 
   - drops `WM_ACTIVATEAPP(FALSE)`, so the music keeps going (it also plays while you're tabbed out);
   - holds back `WM_ACTIVATEAPP(TRUE)` while a video plays;
   - re-posts it 1.5 s after the video ends, if the game is in the foreground. Posting it right at the video's end is too early: the game is still leaving the video and the view stays white.
+- *Also:* loads the system `d3d9.dll` at startup, for the Steam crash (see [section 8](#8-steam)).
 - *Debugging:* set `FOCUSFIX_LOG=<file>` to get a log. `FOCUSFIX_DELAY=<ms>` changes the re-post delay.
 - *Build:* `src\focusfix\build.cmd` (Visual Studio Build Tools, x86) writes `bin\msvfw32.dll`.
 
+## 8. Steam
+
+The game files are identical to GOG's. The differences are all in how Steam starts the game.
+
+**Compatibility flags are re-applied on every launch.** Steam's signed install scripts (`overseer_installscript_one/two.vdf`) write
+`WIN95 DISABLETHEMES DISABLECICERO DISABLETHEMES RUNASADMIN` to `HKCU\…\AppCompatFlags\Layers` for the game's path.
+Steam runs these scripts again each time it starts the game. That overwrites the fix's value, so the game runs elevated with the crashing WIN95 layer.
+
+The workaround uses the fact that the flags are stored per path:
+1. The installer creates a junction `C:\TexOverseer-Steam` → game folder.
+2. It gives *that* path the `~ WIN7RTM` value.
+3. It sets the game's Steam launch options to:
+   ```
+   "C:\TexOverseer-Steam\OVERSEER.EXE" %command%
+   ```
+
+Steam then starts our path and passes its own command line as arguments, which the game ignores. Steam still sees the game as running, and the overlay still loads.
+
+**Where Steam keeps launch options.** They are stored per Steam user in `<Steam>\userdata\<id>\config\localconfig.vdf`, under
+`UserLocalConfigStore\Software\Valve\Steam\apps\302370\LaunchOptions`. The file is text VDF, UTF-8 without BOM, with `\\` and `\"` escapes.
+- Steam keeps the file in memory and rewrites it when it exits. The installer therefore only edits it while `steam.exe` isn't running; otherwise it prints the line for the user to paste.
+- The backup keeps the original value and a copy of the file. `uninstall.ps1` restores them.
+
+**Crash when a video starts (stack overflow, `c00000fd`).** This only happens under Steam. The stack alternates endlessly between
+`gameoverlayrenderer!OverlayHookD3D3` and `apphelp!DWM8AND16BitHook_Direct3DCreate9Ex`.
+- When a video starts, DirectShow builds its graph by trying Windows' renderers and decoders as candidates: VMR-9 (`BasicHWCheck`), VMR-7 and `msmpeg2vdec`. These call `Direct3DCreate9`/`Direct3DCreate9Ex`.
+- Steam injects its overlay DLL even when the overlay is disabled for the game, and that DLL hooks both functions.
+- Windows' DWM8And16Bit mitigation hooks them too. It is applied to the process whatever the layer or exe name.
+- Each hook ends up calling the other until the stack overflows.
+- Blocking individual renderers only moved the problem to the next component that calls D3D9.
+
+Fix: focusfix loads `%WINDIR%\SysWOW64\d3d9.dll` from its `DllMain`, before either hook is installed. After that, the calls return normally.
+Verified with the overlay switched on (`gameoverlayrenderer.dll` loaded in the game) and off. GOG behaviour is unchanged.
+
 ## Test tooling
 
-`tests/smoke-test.ps1` starts the game and checks:
+`tests/smoke-test.ps1` starts the game (through Steam for a Steam copy) and checks:
 - the process is **not** elevated (token check);
 - it clicks the System Checker's *Continue* button;
 - the game's audio is measured through the Windows audio session meter;

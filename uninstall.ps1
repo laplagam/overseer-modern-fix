@@ -22,12 +22,14 @@ if (-not $NoElevate -and -not (Test-IsAdmin)) {
     return
 }
 
-try {
-    $GameDir = Resolve-GameDir -GameDir $GameDir
+function Uninstall-Fix([string]$GameDir) {
     $dir = Join-Path $GameDir $script:BackupFolder
     $stateFile = Join-Path $dir 'state.json'
-    if (-not (Test-Path $stateFile)) { throw "No backup found in $dir - the fix does not seem to be installed." }
+    Write-Host ''
+    Write-Host "--- $GameDir ---" -ForegroundColor Cyan
+    if (-not (Test-Path $stateFile)) { Write-Step 'The fix is not installed here.'; return $false }
     $state = Get-Content $stateFile -Raw | ConvertFrom-Json
+    Restore-SteamLaunchOptions $state.SteamLaunch   # first: stops here if Steam is running
 
     foreach ($p in $state.Files.PSObject.Properties) {
         $target = Join-Path $GameDir $p.Name
@@ -58,8 +60,13 @@ try {
     }
 
     Remove-Item $dir -Recurse -Force
-    Write-Host ''
-    Write-Ok 'The fix has been removed. The game is back to how GOG installed it.'
+    Write-Ok 'The fix has been removed. The game is back to how it was installed.'
+    $true
+}
+
+try {
+    $removed = @(foreach ($d in (Resolve-GameDirs -GameDir $GameDir)) { Uninstall-Fix -GameDir $d }) -contains $true
+    if (-not $removed) { throw 'No backup found - the fix does not seem to be installed.' }
 }
 catch {
     Write-Fail "Uninstall failed: $($_.Exception.Message)"

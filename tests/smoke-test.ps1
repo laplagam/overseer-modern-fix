@@ -29,9 +29,23 @@ $start = Get-Date
 
 Write-Banner 'Overseer smoke test'
 Write-Step "Game folder: $GameDir"
-if ($CompatLayer) { $env:__COMPAT_LAYER = $CompatLayer }
-$p = Start-Process -FilePath (Join-Path $GameDir 'OVERSEER.EXE') -WorkingDirectory $GameDir -PassThru
-Remove-Item Env:__COMPAT_LAYER -ErrorAction SilentlyContinue
+if (Test-IsSteamCopy $GameDir) {
+    # Start it through Steam like a player would: Steam re-applies its own compat flags to the
+    # game's real path, and only the launch options set by the installer avoid them.
+    Write-Step 'Steam copy: starting through Steam...'
+    Start-Process "steam://rungameid/$script:SteamAppId"
+    $p = $null
+    for ($i = 0; $i -lt 120 -and -not $p; $i++) {
+        Start-Sleep -Milliseconds 500
+        $p = Get-Process OVERSEER -ErrorAction SilentlyContinue | Select-Object -First 1
+    }
+    if (-not $p) { Write-Fail 'The game did not start within 60 seconds.'; exit 1 }
+}
+else {
+    if ($CompatLayer) { $env:__COMPAT_LAYER = $CompatLayer }
+    $p = Start-Process -FilePath (Join-Path $GameDir 'OVERSEER.EXE') -WorkingDirectory $GameDir -PassThru
+    Remove-Item Env:__COMPAT_LAYER -ErrorAction SilentlyContinue
+}
 
 $results['Started without admin rights'] = -not (Test-ProcessElevated $p)
 $results['System Checker passed'] = Wait-AndClick -Process $p -Button 'Continue' -Seconds 20
